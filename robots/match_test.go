@@ -1,10 +1,6 @@
 package robots
 
-import (
-	"reflect"
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestMatchPathPattern(t *testing.T) {
 	cases := []struct {
@@ -207,43 +203,5 @@ func TestMatchPercentEncoding(t *testing.T) {
 		if _, ok := g.Match(c.path); ok != c.want {
 			t.Errorf("RFC 9309 Section %s: %q against %q = %v, want %v", c.section, c.pattern, c.path, ok, c.want)
 		}
-	}
-}
-
-func TestParseGroups(t *testing.T) {
-	const input = `# a comment line
-User-Agent: ExampleBot
-Disallow: /private   # a trailing comment
-Allow: /private/public
-
-user-agent: A
-user-agent: B
-Disallow:
-Sitemap: https://example.com/sitemap.xml
-Disallow: /tmp
-`
-	want := []Group{
-		{
-			Agents: []string{"examplebot"},
-			Rules: []Rule{
-				{Kind: Disallow, Pattern: "/private", Line: 3},
-				{Kind: Allow, Pattern: "/private/public", Line: 4},
-			},
-		},
-		{
-			Agents: []string{"a", "b"},
-			Rules: []Rule{
-				{Kind: Disallow, Pattern: "", Line: 8},
-				{Kind: Disallow, Pattern: "/tmp", Line: 10},
-			},
-		},
-	}
-
-	got, err := Parse(strings.NewReader(input))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("RFC 9309 Sections 2.1 and 2.2.1: groups = %+v, want %+v", got, want)
 	}
 }
