@@ -4,6 +4,7 @@ package robots
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"io"
 	"slices"
@@ -45,8 +46,9 @@ type Rule struct {
 // 2.2.1, the rules of every group in the file that names the token are merged
 // here, in file order.
 type Group struct {
-	Token string // product token, lowercased, or "*" for the default group
-	Rules []Rule
+	Token   string // product token, lowercased, or "*" for the default group
+	Rules   []Rule
+	Signals ContentSignal // what the Content-Signal lines of the group declare
 }
 
 // Kinds of Finding.
@@ -58,13 +60,22 @@ const (
 	// token and continues with other characters, such as "googlebot/1.2". The
 	// prefix names the group.
 	FindingTokenPrefix = "token-prefix"
-	// FindingRuleBeforeUserAgent reports an allow or disallow line that
-	// precedes every user-agent line. It is dropped rather than attached to the
-	// group that follows.
+	// FindingRuleBeforeUserAgent reports an allow, disallow or content-signal
+	// line that precedes every user-agent line. It is dropped rather than
+	// attached to the group that follows.
 	FindingRuleBeforeUserAgent = "rule-before-user-agent"
 	// FindingTruncated reports input past MaxBytes, with the offset where
 	// parsing stopped.
 	FindingTruncated = "truncated"
+	// FindingUnknownSignalKey reports a Content-Signal key outside SignalKeys.
+	// It is ignored.
+	FindingUnknownSignalKey = "unknown-signal-key"
+	// FindingMalformedSignal reports a Content-Signal pair that is not a key
+	// with the value yes or no. It is ignored.
+	FindingMalformedSignal = "malformed-signal"
+	// FindingSignalConflict reports a Content-Signal key the same group gave
+	// twice with different values. It resolves to no.
+	FindingSignalConflict = "signal-conflict"
 )
 
 // Finding is something Parse noticed that a site owner would want to know.
@@ -72,15 +83,16 @@ const (
 type Finding struct {
 	Kind    string // one of the Finding constants above
 	Line    int    // 1-based line the finding came from, 0 when it is about the whole file
+	Lines   []int  // every line involved, set for FindingSignalConflict
 	Offset  int    // byte offset parsing stopped at, set for FindingTruncated
-	Value   string // field value as written, when one line caused the finding
+	Value   string // field value as written, or the key, when one line caused the finding
 	Message string
 }
 
 // File is a parsed robots.txt file.
 type File struct {
-	Groups   []Group // merged groups, in order of first appearance of the token
-	Findings []Finding
+	Groups   []Group   // merged groups, in order of first appearance of the token
+	Findings []Finding // what Parse noticed, in file order
 }
 
 // Select returns the group that governs the crawler with the given product
@@ -104,8 +116,9 @@ func (f File) Select(token string) (g Group, ok bool) {
 // record is one robots.txt group as written: the consecutive user-agent lines
 // and the rules that follow them, before merging by product token.
 type record struct {
-	tokens []string
-	rules  []Rule
+	tokens  []string
+	rules   []Rule
+	signals []signalEntry
 }
 
 // Parse reads a robots.txt file and returns the groups it defines, merged by
@@ -195,10 +208,34 @@ func Parse(r io.Reader) (File, error) {
 			rec := &records[len(records)-1]
 			rec.rules = append(rec.rules, Rule{Kind: kind, Pattern: value, Line: line})
 			startGroup = true
+		case "content-signal":
+			// The Content Signals Policy (https://contentsignals.org) publishes
+			// its line under "User-Agent: *" only, and says nothing about what a
+			// line in another group means. Reading each line into the group it
+			// appears in is this parser's choice: it scopes a Content-Signal
+			// line like the allow and disallow lines beside it, and a line under
+			// "User-Agent: *" still reaches every crawler the file does not name.
+			if len(records) == 0 {
+				f.Findings = append(f.Findings, Finding{
+					Kind:    FindingRuleBeforeUserAgent,
+					Line:    line,
+					Value:   value,
+					Message: "content-signal before any user-agent line, dropped rather than attached to the group that follows",
+				})
+				continue
+			}
+			entries, findings := parseSignals(value, line)
+			f.Findings = append(f.Findings, findings...)
+			rec := &records[len(records)-1]
+			rec.signals = append(rec.signals, entries...)
+			startGroup = true
 		}
 	}
 
-	f.Groups = merge(records)
+	groups, conflicts := merge(records)
+	f.Groups = groups
+	f.Findings = append(f.Findings, conflicts...)
+	slices.SortStableFunc(f.Findings, func(a, b Finding) int { return cmp.Compare(a.Line, b.Line) })
 	return f, nil
 }
 
@@ -216,21 +253,31 @@ func read(r io.Reader) (data []byte, truncated bool, err error) {
 	return data[:bytes.LastIndexByte(data, '\n')+1], true, nil
 }
 
-func merge(records []record) []Group {
+func merge(records []record) ([]Group, []Finding) {
 	var groups []Group
+	var signals [][]signalEntry
 	index := make(map[string]int)
 	for _, rec := range records {
 		for _, token := range rec.tokens {
 			i, ok := index[token]
 			if !ok {
 				groups = append(groups, Group{Token: token})
+				signals = append(signals, nil)
 				i = len(groups) - 1
 				index[token] = i
 			}
 			groups[i].Rules = append(groups[i].Rules, rec.rules...)
+			signals[i] = append(signals[i], rec.signals...)
 		}
 	}
-	return groups
+
+	var findings []Finding
+	for i := range groups {
+		signal, conflicts := resolveSignals(signals[i])
+		groups[i].Signals = signal
+		findings = append(findings, conflicts...)
+	}
+	return groups, findings
 }
 
 // productToken splits a user-agent value into the product token it starts with,
