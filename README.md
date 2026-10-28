@@ -1,6 +1,6 @@
 # crawlwarrant
 
-crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why.
+crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why.
 
 ## robots
 
@@ -26,11 +26,26 @@ A group is the consecutive `User-agent` lines of a record together with the rule
 
 A value that begins with a product token and continues with something else, such as `Googlebot/1.2`, names the group `googlebot` and is reported. A value with no product token prefix, such as `*bot*`, names nothing: it is reported as `non-portable-token`, because it is not an RFC 9309 product token, Google's parser matches nothing, and other crawlers may match substrings.
 
-`Parse` reports what it noticed as findings rather than errors: non-portable values, an `Allow` or `Disallow` line that precedes every `User-agent` line (reported and dropped, never attached to the group that follows), and input past 500 KiB, which is ignored and reported as `truncated` with the byte offset where parsing stopped.
+`Parse` reports what it noticed as findings rather than errors: non-portable values, an `Allow`, `Disallow` or `Content-Signal` line that precedes every `User-agent` line (reported and dropped, never attached to the group that follows), and input past 500 KiB, which is ignored and reported as `truncated` with the byte offset where parsing stopped.
 
 ### Matching
 
 Matching follows RFC 9309, Section 2.2.2: the matching rule with the most octets wins, an allow rule wins a tie against a disallow rule of the same length, `*` matches any sequence of octets, a trailing `$` anchors the end, an empty `Disallow` value matches nothing, and `/robots.txt` is always allowed. Pattern and path are compared after percent-encoding normalization, with escapes of unreserved characters decoded and every other escape uppercased.
+
+### Content signals
+
+A `Content-Signal` line says what a site allows beyond the crawl itself. `Parse` reads it into the group it appears in, beside the allow and disallow lines, and `Group.Signals` carries the result:
+
+```go
+group, _ := file.Select("ExampleBot")
+fmt.Println(group.Signals.Search, group.Signals.AIInput, group.Signals.AITrain) // yes unset no
+```
+
+The Content Signals Policy defines `search`, `ai-input` and `ai-train`, each taking `yes` or `no`. A key the group never gave stays `SignalUnset`: it grants nothing, refuses nothing, and is never reported as a `no`. So the managed form `search=yes, ai-train=no` has said nothing at all about `ai-input` — and a blank line, or no line, leaves all three open. AI summaries and retrieval-augmented generation fall under `ai-input` rather than `search`, because the policy defines search as indexing and returning links and short excerpts, and excludes AI-generated summaries from it.
+
+A key the policy does not define is ignored and reported as `unknown-signal-key`, a value that is neither `yes` nor `no` as `malformed-signal`; the rest of the line still counts. A key the same group gives twice with different values resolves to `no`, the value that restricts, and is reported as `signal-conflict` naming both lines.
+
+The policy publishes its example under `User-Agent: *` only and says nothing about a line in another group, so scoping each line to the group it appears in is this parser's choice, noted where `Parse` handles the field.
 
 ### Fetch status
 

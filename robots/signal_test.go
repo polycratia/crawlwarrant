@@ -7,8 +7,8 @@ import (
 )
 
 func TestContentSignalManagedForm(t *testing.T) {
-	// The form a managed robots.txt publishes: search granted, training
-	// refused, and nothing said about ai-input.
+	// The form Cloudflare's managed robots.txt publishes: search granted,
+	// training refused, and nothing said about ai-input.
 	const input = `User-Agent: *
 Content-Signal: search=yes, ai-train=no
 Allow: /
