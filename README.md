@@ -1,6 +1,6 @@
 # crawlwarrant
 
-crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why.
+crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; and the `purpose` package, which holds what each published crawler token is for as cited rows of data.
 
 ## robots
 
@@ -67,6 +67,28 @@ p, err := robots.FromFetch(robots.Outcome{Status: 429}).Under(robots.ReadingGoog
 `Under` returns `ErrReadingRequired` for the zero `Reading`: there is no default.
 
 Freshness and long unreachability are rows of data, not a timer. `FreshFor` holds the 24-hour caching limits, and `WhileUnreachable` holds the RFC's 30-day example alongside Google's 12-hour then 30-day sequence, each row with the source it came from. A caller that tracks how long a site has been failing decides which row it is on.
+
+## purpose
+
+`purpose` holds what each published crawler token is for: the operator, the purpose (`training`, `search-index`, `user-initiated`, `control-token`, `ads`), whether the token fetches at all, whether robots.txt applies to it (`yes`, `may-not`, `unknown`), the operator's IP range file, the reverse-DNS suffixes a lookup must end in, and the `Signature-Agent` URL whose key directory signs its requests. Every row names the document it was read from and the day it was read, and nothing in the table is fetched at runtime.
+
+```go
+res, ok := purpose.Lookup("Google-Extended", time.Now())
+if !ok {
+	fmt.Println("no row names that token")
+	return
+}
+fmt.Println(res.Row.Operator, res.Row.Purpose, res.Row.Fetches) // Google control-token false
+for _, r := range res.Reasons {
+	fmt.Println(r.Kind, "-", r.Message)
+}
+```
+
+`Lookup` compares product tokens case-insensitively and as a whole, like `robots.Select`. A token the table does not name is unlisted, not an impostor: `ok` is false and the caller decides what that means.
+
+`Google-Extended` is in the table with `Fetches` false and no range file, because it is a robots.txt control token rather than a crawler: it names a use a site can refuse, and no request is ever sent under it. A request whose `User-Agent` claims it matches no published range by construction, so `Lookup` returns the `token never fetches` reason instead of leaving a caller to attempt a verification that cannot succeed. The same way, a fetch a person asked for carries `may-not` (`ChatGPT-User`) or `unknown` (`Perplexity-User`) with a reason, so an audit does not record a passed rule as a violation the operator never agreed to.
+
+Rows age in the open. All of them were read on 2026-10-19, and once a row is more than 180 days older than the time passed to `Lookup`, the `purpose row stale` reason is added, naming the source to read again. The row is still returned — it is what was published — but its age travels with it.
 
 Run the tests with `go test ./...`.
 
