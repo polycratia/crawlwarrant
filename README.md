@@ -1,6 +1,6 @@
 # crawlwarrant
 
-crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; and the `purpose` package, which holds what each published crawler token is for as cited rows of data.
+crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; and the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence.
 
 ## robots
 
@@ -89,6 +89,53 @@ for _, r := range res.Reasons {
 `Google-Extended` is in the table with `Fetches` false and no range file, because it is a robots.txt control token rather than a crawler: it names a use a site can refuse, and no request is ever sent under it. A request whose `User-Agent` claims it matches no published range by construction, so `Lookup` returns the `token never fetches` reason instead of leaving a caller to attempt a verification that cannot succeed. The same way, a fetch a person asked for carries `may-not` (`ChatGPT-User`) or `unknown` (`Perplexity-User`) with a reason, so an audit does not record a passed rule as a violation the operator never agreed to.
 
 Rows age in the open. All of them were read on 2026-10-19, and once a row is more than 180 days older than the time passed to `Lookup`, the `purpose row stale` reason is added, naming the source to read again. The row is still returned — it is what was published — but its age travels with it.
+
+## identity
+
+`identity` settles who a request is before it applies what the site allowed. Evidence is `signed`, `range`, `fcrdns`, `claimant` or `anonymous`, and only the first three tie a request to an operator, so only they put that operator's group in force:
+
+```go
+v := identity.Decide(req, policy, identity.Signed("GPTBot", "https://chatgpt.com/.well-known/http-message-signatures-directory"))
+fmt.Println(v.Verified, v.Group.Token, v.Allowed) // true gptbot true
+for _, r := range v.Reasons {
+	fmt.Println(r.Kind, "-", r.Message)
+}
+```
+
+A request whose `User-Agent` names a published token and proves nothing further is a claimant: it gets the `*` group, and the chain records `claimed GPTBot, unverified`. It is not called an impostor, because nothing about it was disproved — it was only never verified. A request that names no published token is anonymous and gets the `*` group as well. When evidence verifies one token while the header claims another, the verified token decides and the chain says so.
+
+The `Verdict` is the ordered chain of reasons that produced it: how identity was settled, which group that put in force, then what decided the path, with `Deciding` returning the last of them.
+
+### Range snapshots
+
+A `Snapshot` is one recorded fetch of the IP range file an operator publishes for its crawlers, with the dates a match has to be read against: the `creationTime` the operator put in the file, when we fetched it, and the URL that answered.
+
+```go
+snap, err := identity.Load(identity.Snapshot{
+	Operator:     "OpenAI",
+	Tokens:       []string{"GPTBot"},
+	URL:          "https://openai.com/gptbot.json",
+	CreationTime: creationTime,
+	FetchedAt:    time.Now(),
+	Prefixes:     prefixes,
+})
+if err != nil {
+	return err
+}
+ev := snap.Verify(ip, "GPTBot", time.Now())
+```
+
+`Load` refuses a general cloud provider list — AWS `ip-ranges.json`, Google Cloud `cloud.json`, Google's `goog.json`, Azure service tags — with `ErrCloudRangeList`, and refuses one a redirect led to the same way. Those files cover every address a customer of that provider can rent, so a match proves hosting, not a crawler, and the refusal belongs at load rather than at a request the file cannot speak for.
+
+Past the snapshot's `MaxAge`, 24 hours unless it sets its own, nothing is verified against it until it is fetched again. A file another URL answered for still verifies, with `range source redirected` in the chain: it is re-verified at its published URL before it is trusted again. A file that carried no `creationTime` is flagged too, because how old the operator's own data is cannot be read from it. And a file several tokens share verifies the operator, not which of its products sent the request, which the chain says in as many words.
+
+### Forward-confirmed reverse DNS
+
+`FCrDNS` goes through an injected `Resolver`, which `*net.Resolver` satisfies and a test supplies its own of, so no test here touches live DNS. The address must reverse to a name inside one of the suffixes the operator publishes, and that name must resolve back to the address. A resolver that fails verifies nothing and is held against nobody: the failure travels as a reason.
+
+### Middleware
+
+`Middleware` decides every request, stores the `Verdict` in its context for `FromContext`, and blocks with 403 only when `opts.Enforce` is set. Left unset, every request is served and the verdict is only the record of what the policy said.
 
 Run the tests with `go test ./...`.
 
