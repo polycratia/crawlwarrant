@@ -1,6 +1,6 @@
 # crawlwarrant
 
-crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; and the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence.
+crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence; and the `webbotauth` package, which reads the header fields a Web Bot Auth request carries as the structured fields they are.
 
 ## robots
 
@@ -136,6 +136,38 @@ Past the snapshot's `MaxAge`, 24 hours unless it sets its own, nothing is verifi
 ### Middleware
 
 `Middleware` decides every request, stores the `Verdict` in its context for `FromContext`, and blocks with 403 only when `opts.Enforce` is set. Left unset, every request is served and the verdict is only the record of what the policy said.
+
+## webbotauth
+
+`webbotauth` reads the header fields a Web Bot Auth request carries: `Signature-Agent`, which names where the keys that signed the request are published, and `Signature-Input`, which says what each signature covers.
+
+```go
+sa, err := webbotauth.ParseSignatureAgent(r.Header.Get("Signature-Agent"))
+if err != nil {
+	return err
+}
+for _, a := range sa.Agents {
+	fmt.Println(a.Label, a.URL, a.Type) // sig1 https://chatgpt.com/.well-known/http-message-signatures-directory directory
+}
+
+sigs, err := webbotauth.ParseSignatureInput(r.Header.Get("Signature-Input"))
+if err != nil {
+	return err
+}
+fmt.Println(sigs[0].KeyID, sigs[0].Tag, sigs[0].Created, sigs[0].Components[0].Name)
+```
+
+A `Signature-Agent` member is a string holding an https URL with an optional `type` parameter. A member that gives no type is a `directory`, `jwks_uri` and `cimd` are recognised, and any other type is kept with the member as `TypeOther` with the spelling the field used: a document this package cannot read is not a malformed field. A plain `http` URL is refused with `ErrNotHTTPS`, because keys fetched over a connection nobody authenticated prove nothing, and a member that is not a string — a token, an integer, an inner list — with `ErrNotAString`.
+
+The bare string form, which ChatGPT agent sends as `Signature-Agent: "https://chatgpt.com"`, is accepted and reported as `Legacy`. It is read on input only and never produced, so a caller can serve the senders that still send it without putting the superseded form back on the wire.
+
+`ParseSignatureInput` returns, per label, the covered components with the parameters each one carried, such as `req` or `sf`, and the `created`, `expires`, `keyid`, `tag` and `nonce` parameters of the signature. A label the field gave no `created` for keeps the zero time rather than a guess at one.
+
+Both fields are RFC 9651 structured fields, parsed by `internal/sfv`, which reads the subset Web Bot Auth needs: dictionaries, inner lists, strings, tokens, integers, byte sequences, booleans and the parameters of each. A form the subset leaves out, a decimal or a date among them, is refused like any other malformed input: with the byte offset it was refused at, so a caller can quote the field around it. The offset never points past the end of the input, which `FuzzDictionary` asserts for any input at all, along with the parser never panicking:
+
+```
+go test -run FuzzDictionary -fuzz FuzzDictionary ./internal/sfv
+```
 
 Run the tests with `go test ./...`.
 
