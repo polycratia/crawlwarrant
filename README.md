@@ -1,6 +1,6 @@
 # crawlwarrant
 
-crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence; and the `webbotauth` package, which reads the header fields a Web Bot Auth request carries as the structured fields they are.
+crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence; and the `webbotauth` package, which reads the header fields a Web Bot Auth request carries as the structured fields they are and verifies the signature they describe against the keys a directory published.
 
 ## robots
 
@@ -162,6 +162,37 @@ A `Signature-Agent` member is a string holding an https URL with an optional `ty
 The bare string form, which ChatGPT agent sends as `Signature-Agent: "https://chatgpt.com"`, is accepted and reported as `Legacy`. It is read on input only and never produced, so a caller can serve the senders that still send it without putting the superseded form back on the wire.
 
 `ParseSignatureInput` returns, per label, the covered components with the parameters each one carried, such as `req` or `sf`, and the `created`, `expires`, `keyid`, `tag` and `nonce` parameters of the signature. A label the field gave no `created` for keeps the zero time rather than a guess at one.
+
+### Verifying a signature
+
+`Verify` checks the signature a request carries against the keys a directory published, as of the time passed to it, and returns the `Verdict` of the signature it verified or the refusal that stopped it. The revision it follows is pinned in `Draft`, so a verdict says which document it was reached under.
+
+```go
+keys := webbotauth.NewKeyring()
+thumbprint, err := keys.Add("https://crawler.example/.well-known/http-message-signatures-directory", jwk)
+if err != nil {
+	return err
+}
+
+v, err := webbotauth.Verify(r, keys, time.Now())
+if err != nil {
+	return err
+}
+fmt.Println(v.Directory, v.Thumbprint == thumbprint, v.Components)
+for _, reason := range v.Reasons {
+	fmt.Println(reason.Kind, "-", reason.Message)
+}
+```
+
+The signature that gets verified is the one tagged `web-bot-auth`. A request may carry others, and a `Signature-Input` naming none is refused with `ErrTag` rather than read under a tag meant for another protocol. `created` and `expires` are both required (`ErrMissingParameter`) and checked against `now` with `Keyring.Skew`, `DefaultSkew` of five seconds when the keyring sets none; a window that has closed, one that has not opened, and an `expires` before its `created` are all `ErrOutsideWindow`.
+
+The covered components must include `@authority` or `@target-uri`, which binds the signature to the host it was sent to, and `signature-agent`, the field naming the key directory of the label; anything less is `ErrCoveredComponents`, as is a covered field the request does not carry. The signature base is rebuilt from the request per RFC 9421, Section 2.5, with the signature parameters as the field spelled them, and the bytes that verified travel in `Verdict.Base` so an audit can read them. A covered component this package does not rebuild — `@status` on a request, or a component carrying a parameter such as `sf` — is `ErrUnsupportedComponent`: a base nobody can rebuild is unverifiable, which is not the same as a signature that is wrong.
+
+`keyid` is not a name the sender is taken at its word on. It must equal the RFC 7638 thumbprint computed here from the Ed25519 JWK (RFC 8037), and the key is then looked up by the directory URL and that thumbprint together, because a key proves nothing about a directory that did not publish it. `Keyring.Add` records a key under the thumbprint it computes and refuses a published `kid` that is not it, with `ErrThumbprintMismatch`. Only Ed25519 verifies: an `alg` naming HMAC or anything else is `ErrAlgorithm`, and so is key material that is not 32 bytes of canonically encoded unpadded base64url (`ErrKeyMaterial`), an encoding that would otherwise thumbprint to a second name for one key.
+
+What a verified signature leaves open travels in the verdict as reasons rather than refusals. With no `ReplayCache` configured nothing checks a nonce, so the verdict carries `replayable within window`: the signature can be sent again until it expires. A cache is opt-in, keyed by the nonce when the signature gives one and by the signature bytes when it does not, and one it has already seen is `ErrReplay`. A lifetime above `MaxLifetime`, the 24 hours the draft asks for, is reported as `lifetime above 24 hours` and still verified, and a directory named by the legacy bare string form of `Signature-Agent` as `legacy signature-agent`.
+
+### Structured fields
 
 Both fields are RFC 9651 structured fields, parsed by `internal/sfv`, which reads the subset Web Bot Auth needs: dictionaries, inner lists, strings, tokens, integers, byte sequences, booleans and the parameters of each. A form the subset leaves out, a decimal or a date among them, is refused like any other malformed input: with the byte offset it was refused at, so a caller can quote the field around it. The offset never points past the end of the input, which `FuzzDictionary` asserts for any input at all, along with the parser never panicking:
 

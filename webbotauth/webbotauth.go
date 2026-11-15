@@ -1,8 +1,11 @@
-// Package webbotauth reads the header fields a Web Bot Auth request carries:
-// Signature-Agent, which names where the keys that signed the request are
-// published, and Signature-Input, which says what each signature covers. Both
-// are RFC 9651 structured fields, and a field that does not parse is refused
-// with the byte offset it was refused at.
+// Package webbotauth verifies the Web Bot Auth signature a request carries.
+// Verify follows the revision pinned in Draft: it rebuilds the signature base
+// per RFC 9421, computes the RFC 7638 thumbprint of the key here rather than
+// trusting the keyid that names it, and verifies with Ed25519 only. The fields
+// it reads are Signature-Agent, which names where the keys that signed the
+// request are published, and Signature-Input, which says what each signature
+// covers. Both are RFC 9651 structured fields, and a field that does not parse
+// is refused with the byte offset it was refused at.
 package webbotauth
 
 import (
