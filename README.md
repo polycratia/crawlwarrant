@@ -1,6 +1,6 @@
 # crawlwarrant
 
-crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence; and the `webbotauth` package, which reads the header fields a Web Bot Auth request carries as the structured fields they are and verifies the signature they describe against the keys a directory published.
+crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence; and the `webbotauth` package, which reads the header fields a Web Bot Auth request carries as the structured fields they are, fetches the keys a crawler publishes, and verifies the signature they describe against them.
 
 ## robots
 
@@ -191,6 +191,33 @@ The covered components must include `@authority` or `@target-uri`, which binds t
 `keyid` is not a name the sender is taken at its word on. It must equal the RFC 7638 thumbprint computed here from the Ed25519 JWK (RFC 8037), and the key is then looked up by the directory URL and that thumbprint together, because a key proves nothing about a directory that did not publish it. `Keyring.Add` records a key under the thumbprint it computes and refuses a published `kid` that is not it, with `ErrThumbprintMismatch`. Only Ed25519 verifies: an `alg` naming HMAC or anything else is `ErrAlgorithm`, and so is key material that is not 32 bytes of canonically encoded unpadded base64url (`ErrKeyMaterial`), an encoding that would otherwise thumbprint to a second name for one key.
 
 What a verified signature leaves open travels in the verdict as reasons rather than refusals. With no `ReplayCache` configured nothing checks a nonce, so the verdict carries `replayable within window`: the signature can be sent again until it expires. A cache is opt-in, keyed by the nonce when the signature gives one and by the signature bytes when it does not, and one it has already seen is `ErrReplay`. A lifetime above `MaxLifetime`, the 24 hours the draft asks for, is reported as `lifetime above 24 hours` and still verified, and a directory named by the legacy bare string form of `Signature-Agent` as `legacy signature-agent`.
+
+### Fetching a key directory
+
+`Directory` fetches the keys a crawler publishes at `DirectoryPath`, `/.well-known/http-message-signatures-directory`, and caches them by directory URL and thumbprint together. A URL naming a host alone — which the legacy bare string form of `Signature-Agent` does — is read as that path under it, and a URL that is not https is refused with `ErrNotHTTPS` before any request is made.
+
+```go
+dir := webbotauth.NewDirectory(&http.Transport{
+	DialContext: (&webbotauth.Dialer{}).DialContext,
+})
+keys, err := dir.Keys(ctx, "https://crawler.example", time.Now())
+if err != nil {
+	return err
+}
+fmt.Println(keys.URL, keys.Thumbprints, keys.FetchedAt)
+
+v, err := webbotauth.Verify(r, dir.Keyring("https://crawler.example"), time.Now())
+```
+
+Only a 200 is a document to read. Every other status is a discovery failure, `ErrDirectoryStatus`, and a redirect is refused with `ErrDirectoryRedirect` instead of followed — the deliberate inverse of the five hops a robots.txt fetch follows, pinned by a test, because the file being fetched here is the one that decides which key counts. `Directory` holds a `RoundTripper` rather than a `Client` for that reason: there is no redirect policy to configure, and a `Directory` with none set refuses with `ErrNoTransport`.
+
+Fetched keys are used for `TTL`, `DefaultDirectoryTTL` of an hour when unset, and then the directory is asked again. A refresh that fails evicts nothing: the keys already cached are returned with the `key refresh failed` reason naming the failure, the fetch they came from, and when the next one will be attempted. A refresh that succeeds replaces them, so a key the new document omits is revoked by its absence. A failure with no keys behind it is remembered for `NegativeTTL`, `DefaultNegativeTTL` of five minutes when unset, and a `Retry-After` the response gave is honoured instead, as seconds or as an HTTP date.
+
+A body above `MaxBytes` is `ErrDirectoryTooLarge` and more than `MaxKeys` keys is `ErrTooManyKeys`, at 64 KiB and 32 keys unless the `Directory` sets its own; a refused document caches nothing. A published key this package cannot verify with — a key type other than `OKP` on Ed25519, key material that is not canonical, or a `kid` that is not the thumbprint of the key beside it — is skipped with the `unusable published key` reason and the rest of the document is kept. A document with no usable key at all is `ErrDirectoryBody`.
+
+Every fetch is bounded by `Timeout`, `DefaultDirectoryTimeout` of ten seconds when unset, and concurrent calls for one directory are coalesced into a single fetch that all of them read.
+
+`Dialer` resolves the name itself and checks each address against its `Policy` before dialing it, so neither a DNS record nor a URL can aim a fetch at the network the fetch is made from. `AllowedAddress` is that policy by default: it refuses loopback, unspecified, link-local, multicast, private and carrier-grade NAT addresses with `ErrAddressNotAllowed`, IPv4-mapped forms included. Both the `Resolver` and the dial are injected, so the tests here run against a `RoundTripper` and an address policy of their own and never reach the network.
 
 ### Structured fields
 
