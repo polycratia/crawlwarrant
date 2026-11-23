@@ -1,0 +1,10 @@
+warning search-disallowed-training-allowed Claude-SearchBot
+  ClaudeBot is allowed to collect pages for training, while disallow "/" on line 2 refuses Claude-SearchBot, the search index of the same operator
+  Anthropic: disallowing it keeps the site out of the pages Claude's search cites (https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler)
+error citation-wanted-search-disallowed Claude-SearchBot
+  the site asks to be cited, and disallow "/" on line 2 refuses Claude-SearchBot, a search-index crawler
+  Anthropic: disallowing it keeps the site out of the pages Claude's search cites (https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler)
+error citation-wanted-search-disallowed PerplexityBot
+  the site asks to be cited, and disallow "/" on line 5 refuses PerplexityBot, a search-index crawler
+  Perplexity: disallowing it keeps the site out of the pages Perplexity lists and cites (https://docs.perplexity.ai/guides/bots)
+2 errors, 1 warning

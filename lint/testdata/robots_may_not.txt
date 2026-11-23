@@ -1,0 +1,4 @@
+warning robots-may-not-apply-disallowed ChatGPT-User
+  disallow "/" on line 2 refuses ChatGPT-User, whose operator publishes that robots.txt may not apply to it
+  OpenAI: it fetches because a person asked for the page, so robots.txt rules may not apply (https://developers.openai.com/api/docs/bots)
+0 errors, 1 warning

@@ -1,8 +1,9 @@
 // Package purpose holds what each published AI crawler product token is for:
 // who operates it, what it fetches for, whether it fetches at all, whether
-// robots.txt applies to it, and where the operator publishes the material an
-// identity check needs. Every row names the document it was read from and the
-// day it was read; nothing in the table is fetched at runtime.
+// robots.txt applies to it, what the operator says refusing it does, and where
+// the operator publishes the material an identity check needs. Every row names
+// the document it was read from and the day it was read; nothing in the table
+// is fetched at runtime.
 package purpose
 
 import (
@@ -78,16 +79,20 @@ func (r RobotsApplies) String() string {
 
 // Row is one product token as its operator publishes it.
 type Row struct {
-	Token          string        // product token, as the operator spells it
-	Operator       string        // company whose requests carry the token
-	Purpose        Purpose       // what the operator says the token is for
-	Fetches        bool          // whether any request is sent under the token
-	RobotsApplies  RobotsApplies // what the operator says about robots.txt
-	RangeFileURL   string        // published IP range file, empty when none
-	ReverseDNS     []string      // host suffixes a reverse lookup must end in, empty when none published
-	SignatureAgent string        // Signature-Agent URL whose key directory signs the requests, empty when none
-	SourceURL      string        // document the row was read from
-	VerifiedOn     time.Time     // day that document was read
+	Token         string        // product token, as the operator spells it
+	Operator      string        // company whose requests carry the token
+	Purpose       Purpose       // what the operator says the token is for
+	Fetches       bool          // whether any request is sent under the token
+	RobotsApplies RobotsApplies // what the operator says about robots.txt
+	// Wording is the operator's own account of what refusing the token does,
+	// condensed from the document SourceURL names, so a report about a rule can
+	// quote the vendor rather than guess at the consequence.
+	Wording        string
+	RangeFileURL   string    // published IP range file, empty when none
+	ReverseDNS     []string  // host suffixes a reverse lookup must end in, empty when none published
+	SignatureAgent string    // Signature-Agent URL whose key directory signs the requests, empty when none
+	SourceURL      string    // document the row was read from
+	VerifiedOn     time.Time // day that document was read
 }
 
 // Kinds of Reason.
@@ -177,6 +182,7 @@ var Table = []Row{
 		Purpose:       PurposeTraining,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it keeps the site out of the crawl that trains OpenAI's models",
 		RangeFileURL:  "https://openai.com/gptbot.json",
 		SourceURL:     "https://developers.openai.com/api/docs/bots",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -187,6 +193,7 @@ var Table = []Row{
 		Purpose:       PurposeSearchIndex,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it keeps the site out of ChatGPT search answers, where it can still appear as a navigational link",
 		RangeFileURL:  "https://openai.com/searchbot.json",
 		SourceURL:     "https://developers.openai.com/api/docs/bots",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -197,6 +204,7 @@ var Table = []Row{
 		Purpose:        PurposeUserInitiated,
 		Fetches:        true,
 		RobotsApplies:  RobotsMayNot,
+		Wording:        "it fetches because a person asked for the page, so robots.txt rules may not apply",
 		RangeFileURL:   "https://openai.com/chatgpt-user.json",
 		SignatureAgent: "https://chatgpt.com/.well-known/http-message-signatures-directory",
 		SourceURL:      "https://developers.openai.com/api/docs/bots",
@@ -208,6 +216,7 @@ var Table = []Row{
 		Purpose:       PurposeAds,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it keeps the site out of the crawl behind OpenAI's ads",
 		RangeFileURL:  "https://openai.com/adsbot.json",
 		SourceURL:     "https://developers.openai.com/api/docs/bots",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -218,6 +227,7 @@ var Table = []Row{
 		Purpose:       PurposeTraining,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it keeps the site out of Anthropic's training crawl",
 		RangeFileURL:  "https://claude.com/crawling/bots.json",
 		SourceURL:     "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -228,6 +238,7 @@ var Table = []Row{
 		Purpose:       PurposeSearchIndex,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it keeps the site out of the pages Claude's search cites",
 		RangeFileURL:  "https://claude.com/crawling/bots.json",
 		SourceURL:     "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -238,6 +249,7 @@ var Table = []Row{
 		Purpose:       PurposeUserInitiated,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "it fetches the page a user asked Claude to visit",
 		RangeFileURL:  "https://claude.com/crawling/bots.json",
 		SourceURL:     "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -248,6 +260,7 @@ var Table = []Row{
 		Purpose:       PurposeSearchIndex,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it removes the site from Google Search",
 		RangeFileURL:  "https://developers.google.com/static/crawling/ipranges/common-crawlers.json",
 		ReverseDNS:    []string{"crawl.googlebot.com", "googlebot.com"},
 		SourceURL:     "https://developers.google.com/search/docs/crawling-indexing/verifying-googlebot",
@@ -259,6 +272,7 @@ var Table = []Row{
 		Purpose:       PurposeControlToken,
 		Fetches:       false,
 		RobotsApplies: RobotsYes,
+		Wording:       "it crawls nothing and does not affect inclusion or ranking in Google Search",
 		SourceURL:     "https://developers.google.com/search/docs/crawling-indexing/overview-google-crawlers",
 		VerifiedOn:    day(2026, time.October, 19),
 	},
@@ -268,6 +282,7 @@ var Table = []Row{
 		Purpose:       PurposeSearchIndex,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it keeps the site out of the pages Perplexity lists and cites",
 		RangeFileURL:  "https://www.perplexity.ai/perplexitybot.json",
 		SourceURL:     "https://docs.perplexity.ai/guides/bots",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -278,6 +293,7 @@ var Table = []Row{
 		Purpose:       PurposeUserInitiated,
 		Fetches:       true,
 		RobotsApplies: RobotsUnknown,
+		Wording:       "it visits the page a user asked for and is not used to crawl for training",
 		RangeFileURL:  "https://www.perplexity.ai/perplexity-user.json",
 		SourceURL:     "https://docs.perplexity.ai/guides/bots",
 		VerifiedOn:    day(2026, time.October, 19),
@@ -288,6 +304,7 @@ var Table = []Row{
 		Purpose:       PurposeSearchIndex,
 		Fetches:       true,
 		RobotsApplies: RobotsYes,
+		Wording:       "disallowing it removes the site from the Bing index",
 		RangeFileURL:  "https://www.bing.com/toolbox/bingbot.json",
 		ReverseDNS:    []string{"search.msn.com"},
 		SourceURL:     "https://www.bing.com/webmasters/help/how-to-verify-bingbot-3905dc26",

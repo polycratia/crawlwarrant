@@ -1,0 +1,4 @@
+warning control-token-disallowed Google-Extended
+  disallow "/" on line 2 names Google-Extended, a token no request is ever sent under
+  Google: it crawls nothing and does not affect inclusion or ranking in Google Search (https://developers.google.com/search/docs/crawling-indexing/overview-google-crawlers)
+0 errors, 1 warning

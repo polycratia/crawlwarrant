@@ -1,0 +1,7 @@
+warning ai-input-granted-search-disallowed OAI-SearchBot
+  ai-input=yes grants answering from the page, while disallow "/" on line 3 refuses OAI-SearchBot, the crawler that builds the index those answers link back to
+  OpenAI: disallowing it keeps the site out of ChatGPT search answers, where it can still appear as a navigational link (https://developers.openai.com/api/docs/bots)
+warning search-disallowed-training-allowed OAI-SearchBot
+  GPTBot is allowed to collect pages for training, while disallow "/" on line 3 refuses OAI-SearchBot, the search index of the same operator
+  OpenAI: disallowing it keeps the site out of ChatGPT search answers, where it can still appear as a navigational link (https://developers.openai.com/api/docs/bots)
+0 errors, 2 warnings
