@@ -1,6 +1,6 @@
 # crawlwarrant
 
-crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence; and the `webbotauth` package, which reads the header fields a Web Bot Auth request carries as the structured fields they are, fetches the keys a crawler publishes, and verifies the signature they describe against them.
+crawlwarrant verifies which AI crawler is actually at the door and what the site allowed it: identity checks against published IP ranges and signatures, a machine-readable access policy, and a three-bucket audit of access logs (verified and compliant, verified and violating, impostors claiming a crawler's name). This module holds the `robots` package, which parses robots.txt, picks the group that governs a crawler, applies RFC 9309 matching, reads the `Content-Signal` lines of that group, and reads a fetch status as policy of its own, returning the rule or the status that decided a path so an audit can say why; the `purpose` package, which holds what each published crawler token is for as cited rows of data; the `identity` package, which settles who a request is before it applies what the site allowed, and never puts a vendor's group in force without evidence; the `webbotauth` package, which reads the header fields a Web Bot Auth request carries as the structured fields they are, fetches the keys a crawler publishes, and verifies the signature they describe against them; and the `lint` package, behind the `crawlwarrant` command, which reads a robots.txt file against what the operators publish about the tokens it names and reports where the file contradicts itself.
 
 ## robots
 
@@ -70,7 +70,7 @@ Freshness and long unreachability are rows of data, not a timer. `FreshFor` hold
 
 ## purpose
 
-`purpose` holds what each published crawler token is for: the operator, the purpose (`training`, `search-index`, `user-initiated`, `control-token`, `ads`), whether the token fetches at all, whether robots.txt applies to it (`yes`, `may-not`, `unknown`), the operator's IP range file, the reverse-DNS suffixes a lookup must end in, and the `Signature-Agent` URL whose key directory signs its requests. Every row names the document it was read from and the day it was read, and nothing in the table is fetched at runtime.
+`purpose` holds what each published crawler token is for: the operator, the purpose (`training`, `search-index`, `user-initiated`, `control-token`, `ads`), whether the token fetches at all, whether robots.txt applies to it (`yes`, `may-not`, `unknown`), the operator's IP range file, the reverse-DNS suffixes a lookup must end in, and the `Signature-Agent` URL whose key directory signs its requests. Every row also carries the operator's own wording for what refusing the token does, names the document it was read from and the day it was read, and nothing in the table is fetched at runtime.
 
 ```go
 res, ok := purpose.Lookup("Google-Extended", time.Now())
@@ -226,6 +226,34 @@ Both fields are RFC 9651 structured fields, parsed by `internal/sfv`, which read
 ```
 go test -run FuzzDictionary -fuzz FuzzDictionary ./internal/sfv
 ```
+
+## lint
+
+`lint` reads a parsed robots.txt file against the `purpose` table and reports where the file contradicts itself. A finding names the token, the line the rule was read from, and the operator's own account of what refusing that token does, so a report quotes the vendor rather than guessing at the consequence:
+
+```go
+findings := lint.Check(file, lint.Options{Path: "/articles/one", WantCitation: true})
+fmt.Print(lint.Text(findings))
+errs, warnings := lint.Count(findings)
+```
+
+The rules are read for one path, `DefaultPath` of `/` when `Options.Path` names none, because a file that refuses a crawler under `/articles/` has said nothing about the rest of the site. Five kinds are reported:
+
+- `ai-input-granted-search-disallowed`: the group grants `ai-input=yes` while disallowing a search-index crawler, so the page may be answered from while the crawler that builds the index those answers link back to is refused.
+- `search-disallowed-training-allowed`: an operator's training crawler is allowed while its search crawler is disallowed — `GPTBot` collects pages while `OAI-SearchBot` is kept out of ChatGPT search answers, where the site could still have appeared as a navigational link.
+- `control-token-disallowed`: a disallowed token no request is ever sent under, `Google-Extended` among them, which crawls nothing and does not affect inclusion or ranking in Google Search.
+- `robots-may-not-apply-disallowed`: a disallowed token whose operator publishes that robots.txt may not apply to it, as OpenAI does of `ChatGPT-User`, because the fetch is one a person asked for.
+- `citation-wanted-search-disallowed`: a disallowed search-index crawler for a site that asked to be cited.
+
+Everything but the last is a `warning`: a contradiction to weigh, because a site may well mean it. `Options.WantCitation` says the site wants to be cited in AI answers, and a disallowed search-index crawler then contradicts what the caller asked for rather than only what the file says, so each one is an `error` naming the token. Golden files under `lint/testdata` pin the text of every finding.
+
+### The command
+
+```
+go run ./cmd/crawlwarrant lint [-citation] [-json] [-path /] [-timeout 10s] <path or URL>
+```
+
+A path is read from disk. An `http` or `https` URL is fetched through the address policy a key directory fetch dials under, so neither a DNS record nor a redirect can aim the fetch at the network it is made from, and up to the five redirects RFC 9309 asks for are followed with every hop checked again. The status is read as policy by `robots.FromFetch`: an outcome that reaches no file is reported rather than linted. `-json` prints the findings with the source, the path and the counts, severities spelled out as the words they print. The exit code is 0 when nothing worse than a warning was found, 1 when at least one finding is an error, and 2 when the file could not be read.
 
 Run the tests with `go test ./...`.
 
